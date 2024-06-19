@@ -31,12 +31,12 @@ class Simulation:
         self._yellow_duration = yellow_duration
         self._num_states = num_states
         self._num_actions = num_actions
-        self._reward_store = [] 
+        self._reward_store = [] # store reward for plotting data
         self._training_epochs = training_epochs
+        self._update_target_steps = 100  # Thêm số bước để cập nhật mạng mục tiêu
 
     def run(self, episode, epsilon):
         start_time = timeit.default_timer()
-
         self._TrafficGen.generate_routefile(seed=episode)
         traci.start(self._sumo_cmd)
         print("Simulating...")
@@ -54,7 +54,6 @@ class Simulation:
             penalty = 0
             flag = 0
             current_state = self._get_state()
-
             current_total_wait = self._get_waiting_times()
             if old_action == 1:
                 penalty = 10
@@ -65,7 +64,7 @@ class Simulation:
 
             action = self._choose_action(current_state, epsilon)
 
-            if self._step != 0: 
+            if self._step != 0:
                 if action == 0:
                     self._set_green_phase(last_green_phase)
                     self._simulate(self._green_duration)
@@ -86,9 +85,12 @@ class Simulation:
             old_action = action
             old_total_wait = current_total_wait
             last_green_phase = cur_green_phase
-
             if reward < 0:
                 self._sum_neg_reward += reward
+
+            # Cập nhật mạng mục tiêu định kỳ
+            if self._step % self._update_target_steps == 0:
+                self._Model._update_target_model()
 
         self._save_episode_stats()
         print("Total reward:", self._sum_neg_reward, "- Epsilon:", round(epsilon, 2))
@@ -106,7 +108,6 @@ class Simulation:
     def _simulate(self, steps_todo):
         if (self._step + steps_todo) >= self._max_steps:
             steps_todo = self._max_steps - self._step
-
         while steps_todo > 0:
             traci.simulationStep()
             self._step += 1
@@ -151,7 +152,7 @@ class Simulation:
 
     def _get_state(self):
         traci.junction.subscribeContext('TL', tc.CMD_GET_VEHICLE_VARIABLE, 50, [tc.VAR_SPEED, tc.VAR_ROAD_ID])
-        Route_W_E = [0, 0, 0] 
+        Route_W_E = [0, 0, 0]
         Route_N_S = [0, 0, 0]
         Route_E_W = [0, 0, 0]
         Route_S_N = [0, 0, 0]
@@ -222,23 +223,18 @@ class Simulation:
         if len(batch) > 0:
             states = np.array([val[0] for val in batch])
             next_states = np.array([val[3] for val in batch])
-
             q_s_a = self._Model.predict_batch(states)
-            q_s_a_d = self._Model.predict_batch(next_states)
-            q_s_a_d_target = self._Model._target_model.predict_batch(next_states)
-
+            q_s_a_d = self._Model.target_predict_batch(next_states)
             x = np.zeros((len(batch), self._num_states))
             y = np.zeros((len(batch), self._num_actions))
-
             for i, b in enumerate(batch):
                 state, action, reward, _ = b[0], b[1], b[2], b[3]
                 current_q = q_s_a[i]
-                current_q[action] = reward + self._gamma * q_s_a_d_target[i][np.argmax(q_s_a_d[i])]
+                target_q = reward + self._gamma * np.amax(q_s_a_d[i])
+                current_q[action] = target_q
                 x[i] = state
                 y[i] = current_q
-
             self._Model.train_batch(x, y)
-            self._Model._update_target_model()
 
     def _save_episode_stats(self):
         self._reward_store.append(self._sum_neg_reward)
