@@ -19,8 +19,8 @@ class TrainModel:
         self._batch_size = batch_size
         self._learning_rate = learning_rate
         self._model = self._build_model(num_layers, width)
-        self._target_model = self._build_model(num_layers, width)
-        self._update_target_model()
+        self._target_model = self._build_model(num_layers, width)  # Thêm mạng mục tiêu
+        self._update_target_model()  # Đồng bộ hóa trọng số ban đầu
 
     def _build_model(self, num_layers, width):
         inputs = keras.Input(shape=(self._input_dim,))
@@ -28,7 +28,7 @@ class TrainModel:
         x = layers.Dense(512, activation='relu')(inputs)
         x = layers.Dense(256, activation='relu')(x)
         x = layers.Dense(64, activation='relu')(x)
-        
+
         outputs = layers.Dense(self._output_dim, activation='linear')(x)
 
         model = keras.Model(inputs=inputs, outputs=outputs, name="my_model")
@@ -44,6 +44,9 @@ class TrainModel:
 
     def predict_batch(self, states):
         return self._model.predict(states)
+
+    def target_predict_batch(self, states):
+        return self._target_model.predict(states)
 
     def train_batch(self, states, q_sa):
         self._model.fit(states, q_sa, epochs=1, verbose=0)
